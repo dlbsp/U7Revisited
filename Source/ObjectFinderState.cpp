@@ -53,7 +53,8 @@ void ObjectFinderState::OnEnter()
 	m_mapCamera = { { map.x, map.y }, { 0, 0 }, 0, map.width / 3072.0f };
 }
 
-//  One entry per name: shape names (plus frame names like reagents) and NPC names
+//  One entry per name/frame combination: shape names (plus frame names like reagents), frame numbers,
+//  and NPC names.  This keeps stacked/generic items like gold, herbs, or rocks from merging together.
 void ObjectFinderState::BuildEntries()
 {
 	m_entries.clear();
@@ -66,10 +67,27 @@ void ObjectFinderState::BuildEntries()
 			continue;
 		}
 
-		//  Frame names (black pearl, bread...) replace the shape's own name, so list both; frame -1 gives the shape's name
 		int shape = object->m_shapeData->GetShape();
-		set<string> labels = { GetShapeFrameName(shape, object->m_shapeData->GetFrame()) + " (" + to_string(shape) + ")",
-			GetShapeFrameName(shape, -1) + " (" + to_string(shape) + ")" };
+		const int frame = object->m_shapeData->GetFrame();
+		set<string> labels;
+
+		const string shapeName = GetShapeFrameName(shape, -1);
+		if (!shapeName.empty())
+		{
+			labels.insert(shapeName + " (" + to_string(shape) + ")");
+		}
+
+		const string frameName = GetShapeFrameName(shape, frame);
+		if (!frameName.empty() && frame >= 0)
+		{
+			labels.insert(frameName + " (" + to_string(shape) + ", frame " + to_string(frame) + ")");
+		}
+
+		if (frame >= 0 && shapeName != frameName)
+		{
+			labels.insert(frameName + " (" + to_string(shape) + ")");
+		}
+
 		if (object->m_UnitType == U7Object::UnitTypes::UNIT_TYPE_NPC && !object->m_name.empty())
 		{
 			labels.insert(object->m_name + " (NPC " + to_string(object->m_NPCID) + ")");

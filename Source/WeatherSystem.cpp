@@ -32,6 +32,19 @@ namespace
 	constexpr float kFogDimB = 0.68f;
 	constexpr int kFogVeilAlpha = 150;
 
+	Vector3 WeatherAnchorWorldPosition(const Camera& camera)
+	{
+		if (g_firstPersonEnabled && g_Player)
+		{
+			if (U7Object* avatar = g_Player->GetAvatarObject())
+			{
+				return avatar->m_Pos;
+			}
+		}
+		return camera.target;
+	}
+
+
 	float FogIntensityScale(WeatherIntensity intensity)
 	{
 		switch (intensity)
@@ -2785,7 +2798,7 @@ void WeatherSystem::TrySpawnEdgeBurst(Camera camera)
 	const float vx = wx * speed;
 	const float vz = wz * speed;
 
-	const Vector3 center = camera.target;
+	const Vector3 center = WeatherAnchorWorldPosition(camera);
 	const float spawnDist = 28.0f + static_cast<float>(GetRandomValue(0, 12));
 	// Incoming side = opposite travel direction.
 	const float inX = center.x - wx * spawnDist;
@@ -2841,7 +2854,7 @@ void WeatherSystem::TrySpawnEdgeBurst(Camera camera)
 
 void WeatherSystem::UpdateEdgeClouds(float dt, Camera camera)
 {
-	const Vector3 center = camera.target;
+	const Vector3 center = WeatherAnchorWorldPosition(camera);
 	const float wx = WindUnitWX();
 	const float wz = WindUnitWZ();
 	for (EdgeCloud& c : m_edgeClouds)
@@ -2919,7 +2932,7 @@ void WeatherSystem::TrySpawnSkyCloud(Camera camera, bool clearAmbient)
 		+ ((m_windSpeed == WeatherWindSpeed::Off)
 			? 0.0f
 			: static_cast<float>(GetRandomValue(0, 25)) / 10.0f);
-	const Vector3 center = camera.target;
+	const Vector3 center = WeatherAnchorWorldPosition(camera);
 	const float spawnDist = 32.0f + static_cast<float>(GetRandomValue(0, 18));
 	const float inX = center.x - wx * spawnDist;
 	const float inZ = center.z - wz * spawnDist;
@@ -2957,7 +2970,7 @@ void WeatherSystem::TrySpawnSkyCloud(Camera camera, bool clearAmbient)
 
 void WeatherSystem::UpdateSkyClouds(float dt, Camera camera)
 {
-	const Vector3 center = camera.target;
+	const Vector3 center = WeatherAnchorWorldPosition(camera);
 	const float wx = WindUnitWX();
 	const float wz = WindUnitWZ();
 	const float baseSpeed = SkyCloudWindWorldSpeed();
@@ -3146,7 +3159,50 @@ void WeatherSystem::UpdateParticles(float dt)
 			const float drift = PrecipWindDriftPixels() * dt;
 			float dx = 0.0f;
 			float dy = 0.0f;
-			if (m_hasCamera)
+
+			// Project wind into camera space to get screen-space drift direction.
+			if (g_firstPersonEnabled && m_hasCamera)
+			{
+				const Vector3 worldWind = { WindUnitWX(), 0.0f, WindUnitWZ() };
+				Vector3 forward = Vector3Subtract(m_lastCamera.target, m_lastCamera.position);
+				if (Vector3LengthSqr(forward) < 0.0001f)
+				{
+					forward = { 0.0f, 0.0f, -1.0f };
+				}
+				else
+				{
+					forward = Vector3Normalize(forward);
+				}
+				Vector3 right = Vector3CrossProduct(m_lastCamera.up, forward);
+				if (Vector3LengthSqr(right) < 0.0001f)
+				{
+					right = Vector3CrossProduct(Vector3{ 0.0f, 1.0f, 0.0f }, forward);
+				}
+				if (Vector3LengthSqr(right) < 0.0001f)
+				{
+					right = { 1.0f, 0.0f, 0.0f };
+				}
+				else
+				{
+					right = Vector3Normalize(right);
+				}
+				// Project wind into camera's right/up plane to get screen-space direction.
+				const Vector3 up = Vector3Normalize(Vector3CrossProduct(right, forward));
+				const float sx = Vector3DotProduct(worldWind, right);
+				const float sy = Vector3DotProduct(worldWind, up);
+				const float len = std::sqrt(sx * sx + sy * sy);
+				if (len > 0.0001f)
+				{
+					dx = sx / len;
+					dy = std::max(0.0f, sy / len);
+				}
+				else
+				{
+					dx = 0.0f;
+					dy = 0.0f;
+				}
+			}
+			else if (m_hasCamera)
 			{
 				const Vector3 origin = m_lastCamera.target;
 				const Vector3 tip = {
@@ -3175,6 +3231,7 @@ void WeatherSystem::UpdateParticles(float dt)
 					dx = 1.0f;
 					dy = 0.0f;
 				}
+				dy = std::max(0.0f, dy);
 			}
 			else
 			{
